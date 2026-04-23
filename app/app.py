@@ -1,0 +1,169 @@
+import os
+from flask import Flask, request, jsonify, render_template
+
+import instructor_grade
+
+app = Flask(__name__, template_folder='templates')
+
+# === CONFIG ===
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'tmp', 'labs')
+MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB
+ALLOWED_EXTENSIONS = {'lab', 'zib'}
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
+
+
+def _parse_bool_env(value):
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    if normalized in {'1', 'true', 'yes', 'on'}:
+        return True
+    if normalized in {'0', 'false', 'no', 'off'}:
+        return False
+    return None
+
+
+def _is_production_env():
+    env_name = (os.getenv('APP_ENV') or os.getenv('FLASK_ENV') or os.getenv('ENV') or '').strip().lower()
+    return env_name == 'production'
+
+
+def _should_cleanup_artifacts():
+    # Override cleanup behavior with env var: true/false
+    configured = _parse_bool_env(os.getenv('GRADE_CLEANUP_ARTIFACTS'))
+    if configured is not None:
+        return configured
+    # Default: always cleanup to prevent disk growth.
+    # Disable explicitly with GRADE_CLEANUP_ARTIFACTS=false when debugging artifacts.
+    return True
+
+# Ensure upload directories exist
+for d in [UPLOAD_FOLDER]:
+    os.makedirs(d, exist_ok=True)
+
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+# === ROUTES ===
+
+# @app.route('/')
+# def index():
+#     """Serve the grading web UI."""
+#     return render_template('index.html')
+
+# upload file API
+@app.route('/grade', methods=['POST'])
+@app.route('/api/grade', methods=['POST'])
+def grade_lab():
+    """
+    Accepts a .lab/.zib file upload, runs the grading pipeline,
+    and returns a clean JSON result for the student.
+    """
+    # 1. Validate file
+    if 'file' not in request.files:
+        return jsonify({'error': 'Không tìm thấy file trong request.'}), 400
+
+    file = request.files['file']
+
+    if file.filename == '':
+        return jsonify({'error': 'Chưa chọn file nào.'}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({'error': 'Định dạng không hỗ trợ. Vui lòng upload file .lab hoặc .zib'}), 400
+
+    # 2. Save uploaded file
+    filename = file.filename
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename) # upload vao folder tmp/labs
+    submission_key = os.path.splitext(filename)[0]
+
+    # Remove stale artifacts for this same submission key before processing.
+    instructor_grade.cleanup_submission_artifacts(BASE_DIR, submission_key)
+    file.save(filepath)
+
+    try:
+        # 3. Run the grading pipeline
+        raw_result = instructor_grade.instructor_grade_lab(filepath)
+
+        # Handle wrong input file
+        if raw_result == 'wrong_input_file':
+            return jsonify({
+                'error': f'File không hợp lệ. Không tìm thấy lab tương ứng trong hệ thống.'
+            }), 400
+
+        if raw_result == {} or raw_result is None:
+            return jsonify({
+                'error': 'Không thể chấm điểm. File có thể bị lỗi hoặc không đúng định dạng.'
+            }), 400
+
+        # 4. Build pure grading JSON from goals/tasks
+        key = list(raw_result.keys())[0]
+        sv_data = raw_result[key]
+
+        grades = sv_data.get('grades', {})
+
+        tasks = []
+        completed_count = 0
+        for task_name, raw_value in grades.items():
+            # Skip internal keys that are not real tasks.
+            if task_name.startswith('_') or task_name.startswith('cw_'):
+                continue
+
+            completed = False
+            if isinstance(raw_value, bool):
+                completed = raw_value
+            elif isinstance(raw_value, int):
+                completed = raw_value > 0
+
+            if completed:
+                completed_count += 1
+
+            tasks.append({
+                'task': task_name,
+                'completed': completed
+            })
+
+        total_tasks = len(tasks)
+        score = round(10 * completed_count / total_tasks, 1) if total_tasks > 0 else 0.0
+
+        # Extract email and lab name from key
+        parts = key.split('.')
+        lab_name = parts[-1] if parts else 'unknown'
+        email = '.'.join(parts[:-1]) if len(parts) > 1 else 'unknown'
+
+        # Build response
+        result = {
+            'email': email,
+            'lab_name': lab_name,
+            'score': score,
+            'completed_tasks': completed_count,
+            'total_tasks': total_tasks,
+            'tasks': tasks,
+        }
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        return jsonify({
+            'error': f'Lỗi khi xử lý: {str(e)}'
+        }), 500
+
+    finally:
+        if _should_cleanup_artifacts():
+            instructor_grade.cleanup_submission_artifacts(BASE_DIR, submission_key)
+
+        # Clean up uploaded file
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except Exception:
+                pass
+
+
+if __name__ == '__main__':
+    # Run on all interfaces so other machines can access
+    app.run(host='0.0.0.0', port=5000, debug=True)
