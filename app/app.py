@@ -173,7 +173,7 @@ def grade_lab(file: UploadFile | None = File(default=None)):
         return JSONResponse(result, status_code=200)
 
     except Exception:
-        logger.exception('Lỗi khi xử lý bài nộp.')
+        logger.exception('Error while processing submission.')
         return JSONResponse({
             'error': 'Lỗi khi xử lý. Vui lòng thử lại hoặc liên hệ hỗ trợ.'
         }, status_code=500)
