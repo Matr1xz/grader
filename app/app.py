@@ -1,19 +1,20 @@
+import logging
 import os
-from flask import Flask, request, jsonify, render_template
+import uuid
+
+from fastapi import FastAPI, File, UploadFile
+from fastapi.responses import JSONResponse
 
 import instructor_grade
 
-app = Flask(__name__, template_folder='templates')
+app = FastAPI()
+logger = logging.getLogger(__name__)
 
 # === CONFIG ===
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'tmp', 'labs')
 MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS = {'lab', 'zib'}
-
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
-
 
 def _parse_bool_env(value):
     if value is None:
@@ -49,6 +50,25 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def normalize_filename(filename: str | None) -> str:
+    return os.path.basename(filename or '')
+
+
+def _save_upload(file: UploadFile, filepath: str, max_bytes: int) -> bool:
+    size = 0
+    file.file.seek(0)
+    with open(filepath, 'wb') as buffer:
+        while True:
+            chunk = file.file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > max_bytes:
+                return False
+            buffer.write(chunk)
+    return True
+
+
 # === ROUTES ===
 
 # @app.route('/')
@@ -57,33 +77,39 @@ def allowed_file(filename):
 #     return render_template('index.html')
 
 # upload file API
-@app.route('/grade', methods=['POST'])
-@app.route('/api/grade', methods=['POST'])
-def grade_lab():
+@app.post('/grade')
+@app.post('/api/grade')
+def grade_lab(file: UploadFile | None = File(default=None)):
     """
     Accepts a .lab/.zib file upload, runs the grading pipeline,
     and returns a clean JSON result for the student.
     """
     # 1. Validate file
-    if 'file' not in request.files:
-        return jsonify({'error': 'Không tìm thấy file trong request.'}), 400
+    if file is None:
+        return JSONResponse({'error': 'Không tìm thấy file trong request.'}, status_code=400)
 
-    file = request.files['file']
+    filename = normalize_filename(file.filename)
 
-    if file.filename == '':
-        return jsonify({'error': 'Chưa chọn file nào.'}), 400
+    if filename == '':
+        return JSONResponse({'error': 'Chưa chọn file nào.'}, status_code=400)
 
-    if not allowed_file(file.filename):
-        return jsonify({'error': 'Định dạng không hỗ trợ. Vui lòng upload file .lab hoặc .zib'}), 400
+    if not allowed_file(filename):
+        return JSONResponse({'error': 'Định dạng không hỗ trợ. Vui lòng upload file .lab hoặc .zib'}, status_code=400)
 
     # 2. Save uploaded file
-    filename = file.filename
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename) # upload vao folder tmp/labs
+    filepath = os.path.join(UPLOAD_FOLDER, filename) # upload vao folder tmp/labs
     submission_key = os.path.splitext(filename)[0]
 
     # Remove stale artifacts for this same submission key before processing.
     instructor_grade.cleanup_submission_artifacts(BASE_DIR, submission_key)
-    file.save(filepath)
+    saved = _save_upload(file, filepath, MAX_CONTENT_LENGTH)
+    if not saved:
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except Exception:
+                pass
+        return JSONResponse({'error': 'File quá lớn.'}, status_code=413)
 
     try:
         # 3. Run the grading pipeline
@@ -91,14 +117,14 @@ def grade_lab():
 
         # Handle wrong input file
         if raw_result == 'wrong_input_file':
-            return jsonify({
+            return JSONResponse({
                 'error': f'File không hợp lệ. Không tìm thấy lab tương ứng trong hệ thống.'
-            }), 400
+            }, status_code=400)
 
         if raw_result == {} or raw_result is None:
-            return jsonify({
+            return JSONResponse({
                 'error': 'Không thể chấm điểm. File có thể bị lỗi hoặc không đúng định dạng.'
-            }), 400
+            }, status_code=400)
 
         # 4. Build pure grading JSON from goals/tasks
         key = list(raw_result.keys())[0]
@@ -145,12 +171,14 @@ def grade_lab():
             'tasks': tasks,
         }
 
-        return jsonify(result), 200
+        return JSONResponse(result, status_code=200)
 
-    except Exception as e:
-        return jsonify({
-            'error': f'Lỗi khi xử lý: {str(e)}'
-        }), 500
+    except Exception:
+        error_id = uuid.uuid4().hex
+        logger.exception('Error while processing submission. error_id=%s', error_id)
+        return JSONResponse({
+            'error': f'Lỗi khi xử lý. Mã lỗi: {error_id}. Vui lòng thử lại hoặc liên hệ hỗ trợ.'
+        }, status_code=500)
 
     finally:
         if _should_cleanup_artifacts():
@@ -163,7 +191,14 @@ def grade_lab():
             except Exception:
                 pass
 
+        try:
+            file.file.close()
+        except Exception:
+            pass
+
 
 if __name__ == '__main__':
     # Run on all interfaces so other machines can access
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    import uvicorn
+
+    uvicorn.run(app, host='0.0.0.0', port=5000)

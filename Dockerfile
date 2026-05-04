@@ -9,11 +9,12 @@ COPY app /workspace/app
 
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir \
-       flask \
+       fastapi==0.136.1 \
+       uvicorn==0.46.0 \
+       python-multipart==0.0.27 \
        requests \
        pandas \
-       parse \
-       flask-table
+       parse
 
 COPY start.sh /workspace/start.sh
 RUN chmod +x /workspace/start.sh \
