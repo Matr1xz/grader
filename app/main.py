@@ -8,7 +8,7 @@ from app import UPLOAD_FOLDER, app
 from instructor_grade import instructor_grade_lab
 from parsing_grade import parsing_gradedata
 
-ALLOWED_EXTENSIONS = set(['zib', 'lab'])
+ALLOWED_EXTENSIONS = {'zib', 'lab'}
 
 is_debug = True
 

@@ -1,3 +1,4 @@
+import logging
 import os
 
 from fastapi import FastAPI, File, UploadFile
@@ -6,6 +7,7 @@ from fastapi.responses import JSONResponse
 import instructor_grade
 
 app = FastAPI()
+logger = logging.getLogger(__name__)
 
 # === CONFIG ===
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -166,7 +168,8 @@ def grade_lab(file: UploadFile | None = File(default=None)):
 
         return JSONResponse(result, status_code=200)
 
-    except Exception as e:
+    except Exception:
+        logger.exception('Lỗi khi xử lý bài nộp.')
         return JSONResponse({
             'error': 'Lỗi khi xử lý.'
         }, status_code=500)
