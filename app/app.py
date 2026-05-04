@@ -1,5 +1,4 @@
 import os
-import shutil
 
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
@@ -48,6 +47,21 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def _save_upload(file: UploadFile, filepath: str, max_bytes: int) -> bool:
+    size = 0
+    file.file.seek(0)
+    with open(filepath, 'wb') as buffer:
+        while True:
+            chunk = file.file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > max_bytes:
+                return False
+            buffer.write(chunk)
+    return True
+
+
 # === ROUTES ===
 
 # @app.route('/')
@@ -81,13 +95,16 @@ def grade_lab(file: UploadFile | None = File(default=None)):
 
     # Remove stale artifacts for this same submission key before processing.
     instructor_grade.cleanup_submission_artifacts(BASE_DIR, submission_key)
-    with open(filepath, 'wb') as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    saved = _save_upload(file, filepath, MAX_CONTENT_LENGTH)
+    if not saved:
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except Exception:
+                pass
+        return JSONResponse({'error': 'File quá lớn.'}, status_code=413)
 
     try:
-        if os.path.getsize(filepath) > MAX_CONTENT_LENGTH:
-            return JSONResponse({'error': 'File quá lớn.'}, status_code=413)
-
         # 3. Run the grading pipeline
         raw_result = instructor_grade.instructor_grade_lab(filepath)
 
@@ -151,7 +168,7 @@ def grade_lab(file: UploadFile | None = File(default=None)):
 
     except Exception as e:
         return JSONResponse({
-            'error': f'Lỗi khi xử lý: {str(e)}'
+            'error': 'Lỗi khi xử lý.'
         }, status_code=500)
 
     finally:

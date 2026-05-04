@@ -12,11 +12,9 @@ RUN pip install --no-cache-dir --upgrade pip \
        fastapi==0.136.1 \
        uvicorn==0.46.0 \
        python-multipart==0.0.27 \
-       flask \
        requests \
        pandas \
-       parse \
-       flask-table
+       parse
 
 COPY start.sh /workspace/start.sh
 RUN chmod +x /workspace/start.sh \
