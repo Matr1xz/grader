@@ -1,5 +1,6 @@
 import logging
 import os
+import uuid
 
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
@@ -173,9 +174,10 @@ def grade_lab(file: UploadFile | None = File(default=None)):
         return JSONResponse(result, status_code=200)
 
     except Exception:
-        logger.exception('Error while processing submission.')
+        error_id = uuid.uuid4().hex
+        logger.exception('Error while processing submission. error_id=%s', error_id)
         return JSONResponse({
-            'error': 'Lỗi khi xử lý. Vui lòng thử lại hoặc liên hệ hỗ trợ.'
+            'error': f'Lỗi khi xử lý. Mã lỗi: {error_id}. Vui lòng thử lại hoặc liên hệ hỗ trợ.'
         }, status_code=500)
 
     finally:
