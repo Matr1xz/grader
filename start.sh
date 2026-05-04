@@ -11,4 +11,4 @@ cd /workspace/app
 
 python github_folder_sync.py ./.local/pregrade "$github_repo" --token "$github_token" &
 
-exec python app.py
+exec uvicorn app:app --host 0.0.0.0 --port 5000

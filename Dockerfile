@@ -9,6 +9,9 @@ COPY app /workspace/app
 
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir \
+       fastapi==0.136.1 \
+       uvicorn==0.46.0 \
+       python-multipart==0.0.27 \
        flask \
        requests \
        pandas \
