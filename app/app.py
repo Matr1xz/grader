@@ -166,7 +166,7 @@ def grade_lab(file: UploadFile | None = File(default=None)):
                 pass
 
         try:
-            file.close()
+            file.file.close()
         except Exception:
             pass
 
