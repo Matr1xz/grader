@@ -4,7 +4,7 @@ import shutil
 from fastapi import File, UploadFile
 from fastapi.responses import JSONResponse
 
-from app import UPLOAD_FOLDER, app
+from app import UPLOAD_FOLDER, app, normalize_filename
 from instructor_grade import instructor_grade_lab
 from parsing_grade import parsing_gradedata
 
@@ -20,7 +20,7 @@ def upload_file(file: UploadFile | None = File(default=None)):
 	# check if the post request has the file part
 	if file is None:
 		return JSONResponse({'message': 'No file part in the request'}, status_code=400)
-	filename = os.path.basename(file.filename or '')
+	filename = normalize_filename(file.filename)
 	if filename == '':
 		return JSONResponse({'message': 'No file selected for uploading'}, status_code=400)
 	if file and allowed_file(filename):

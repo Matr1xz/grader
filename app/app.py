@@ -49,6 +49,10 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def normalize_filename(filename: str | None) -> str:
+    return os.path.basename(filename or '')
+
+
 def _save_upload(file: UploadFile, filepath: str, max_bytes: int) -> bool:
     size = 0
     file.file.seek(0)
@@ -83,7 +87,7 @@ def grade_lab(file: UploadFile | None = File(default=None)):
     if file is None:
         return JSONResponse({'error': 'Không tìm thấy file trong request.'}, status_code=400)
 
-    filename = os.path.basename(file.filename or '')
+    filename = normalize_filename(file.filename)
 
     if filename == '':
         return JSONResponse({'error': 'Chưa chọn file nào.'}, status_code=400)
@@ -171,7 +175,7 @@ def grade_lab(file: UploadFile | None = File(default=None)):
     except Exception:
         logger.exception('Lỗi khi xử lý bài nộp.')
         return JSONResponse({
-            'error': 'Lỗi khi xử lý.'
+            'error': 'Lỗi khi xử lý. Vui lòng thử lại hoặc liên hệ hỗ trợ.'
         }, status_code=500)
 
     finally:
